@@ -1,4 +1,5 @@
-﻿using UnityEngine;
+﻿using Photon.Pun;
+using UnityEngine;
 
 namespace COMP476A3.UI
 {
@@ -9,36 +10,14 @@ namespace COMP476A3.UI
     {
         #region Methods
         /// <summary>
-        /// Show the pause menu
-        /// </summary>
-        public void Show(bool showing)
-        {
-            GameLogic.IsPaused = showing;
-            this.gameObject.SetActive(showing);
-        }
-
-        /// <summary>
         /// Resume button UI event
         /// </summary>
-        public void Resume() => Show(false);
-
-        /// <summary>
-        /// Restart button UI event
-        /// </summary>
-        public void Restart()
-        {
-            GameLogic.IsPaused = false;
-            GameLogic.LoadScene(GameScenes.WORLD);
-        }
+        public void Toggle() => this.gameObject.SetActive(!this.gameObject.activeInHierarchy);
 
         /// <summary>
         /// Menu button UI event
         /// </summary>
-        public void Menu()
-        {
-            GameLogic.IsPaused = false;
-            GameLogic.LoadScene(GameScenes.MENU);
-        }
+        public void Menu() => PhotonNetwork.LeaveRoom();
 
         /// <summary>
         /// Quit button UI event
