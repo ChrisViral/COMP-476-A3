@@ -1,11 +1,12 @@
 ﻿using System;
+using System.Collections.Generic;
 using Photon.Pun;
 using UnityEngine;
 using UnityEngine.UI;
 
 namespace COMP476A3
 {
-    [DisallowMultipleComponent, RequireComponent(typeof(Rigidbody), typeof(Collider))]
+    [DisallowMultipleComponent, RequireComponent(typeof(Rigidbody), typeof(Collider), typeof(AudioSource))]
     public class TankControl : MonoBehaviourPun
     {
         public enum Rotation
@@ -32,6 +33,10 @@ namespace COMP476A3
         /// Tag for the enemy player
         /// </summary>
         private const string ENEMY_TAG = "Enemy";
+        /// <summary>
+        /// Tag of powerup objects
+        /// </summary>
+        private const string POWERUP_TAG = "Powerup";
         #endregion
 
         #region Fields
@@ -56,6 +61,8 @@ namespace COMP476A3
         [SerializeField]
         private Vector3 bulletSpawn;
         [SerializeField]
+        private Transform leftShooting, rightShooting;
+        [SerializeField]
         private int maxHealth = 50;
         [SerializeField]
         private Image healthBar;
@@ -63,10 +70,14 @@ namespace COMP476A3
         private GameObject explosion;
         [SerializeField]
         private Renderer body;
+        [SerializeField]
+        private AudioClip shootSound, powerupSound;
+        private AudioSource source;
         private Rotation rotateDir = Rotation.NONE;
         private Direction targetDirection;
         private new Rigidbody rigidbody;
         private float smoothSpeed;
+        private bool powerup;
         #endregion
 
         #region Properties
@@ -130,6 +141,42 @@ namespace COMP476A3
         /// </summary>
         [PunRPC]
         public void TintBody() => this.body.material.color = this.photonView.IsMine ? GameLogic.Instance.PlayerColour : GameLogic.Instance.OpponentColour;
+
+        /// <summary>
+        /// Removes the powerup function after 10s
+        /// </summary>
+        private IEnumerator<YieldInstruction> RemovePowerup()
+        {
+            yield return new WaitForSeconds(7f);
+            this.powerup = false;
+        }
+
+        /// <summary>
+        /// Fires a bullet from the specified location and with the specified rotation
+        /// </summary>
+        /// <param name="position">Spawning position</param>
+        /// <param name="rotation">Spawning rotation</param>
+        private void Fire(Vector3 position, Quaternion rotation)
+        {
+            GameObject spawned;
+            if (PhotonNetwork.IsConnected)
+            {
+                spawned = PhotonNetwork.Instantiate(this.bullet.name, position, rotation);
+            }
+            else
+            {
+                spawned = Instantiate(this.bullet, position, rotation).gameObject;
+            }
+
+            spawned.layer = this.gameObject.layer;
+        }
+
+        /// <summary>
+        /// Plays the specified clip
+        /// </summary>
+        /// <param name="clip">Clip to play</param>
+        [PunRPC]
+        private void PlayClip(bool powerup) => this.source.PlayOneShot(powerup ? this.powerupSound : this.shootSound);
         #endregion
 
         #region Functions
@@ -139,6 +186,7 @@ namespace COMP476A3
             this.targetDirection = (Direction)ClampAngle((int)Math.Round(this.transform.rotation.eulerAngles.y));
             this.rigidbody = GetComponent<Rigidbody>();
             this.rigidbody.freezeRotation = true;
+            this.source = GetComponent<AudioSource>();
             this.Health = this.maxHealth;
 
             if (!this.IsControllable())
@@ -147,40 +195,6 @@ namespace COMP476A3
                 GameObject go = this.gameObject;
                 go.layer = ENEMY_LAYER;
                 go.tag = ENEMY_TAG;
-            }
-        }
-
-        private void FixedUpdate()
-        {
-            //Do not move if game over
-            if (GameLogic.Instance.GameOver)
-            {
-                this.rigidbody.velocity = Vector3.zero;
-                this.rigidbody.angularVelocity = Vector3.zero;
-            }
-
-            //Only do physics work if on client machine
-            if (this.IsControllable() && this.rotateDir != Rotation.NONE)
-            {
-                //Rotation
-                float target = (float)this.targetDirection;
-                Quaternion rotation = this.rigidbody.rotation;
-                Vector3 euler = rotation.eulerAngles;
-
-                //Stop rotating when you reach the desired direction
-                if (Mathf.Abs(Mathf.DeltaAngle(euler.y, target)) < 0.001f)
-                {
-                    this.rotateDir = Rotation.NONE;
-                    this.rigidbody.angularVelocity = Vector3.zero;
-                    this.rigidbody.freezeRotation = true;
-                }
-                else
-                {
-                    //Else calculate necessary angular velocity
-                    float prevAngle = rotation.eulerAngles.y;
-                    float newAngle = Quaternion.RotateTowards(rotation, Quaternion.Euler(0f, target, 0f), this.rotateSpeed * Time.fixedDeltaTime).eulerAngles.y;
-                    this.rigidbody.angularVelocity = Vector3.up * ((Mathf.DeltaAngle(prevAngle, newAngle) * Mathf.Deg2Rad) / Time.fixedDeltaTime);
-                }
             }
         }
 
@@ -224,18 +238,13 @@ namespace COMP476A3
                 if (Input.GetButtonDown("Fire"))
                 {
                     Vector3 spawnLocation = this.transform.position + this.transform.TransformVector(this.bulletSpawn);
-                    GameObject spawned;
-                    if (PhotonNetwork.IsConnected)
+                    Fire(spawnLocation, this.rigidbody.rotation);
+                    if (this.powerup)
                     {
-                        spawned = PhotonNetwork.Instantiate(this.bullet.name, spawnLocation, this.rigidbody.rotation);
+                        Fire(this.leftShooting.position, this.leftShooting.rotation);
+                        Fire(this.rightShooting.position, this.rightShooting.rotation);
                     }
-                    else
-                    {
-                        spawned = Instantiate(this.bullet, spawnLocation, this.rigidbody.rotation).gameObject;
-                    }
-
-                    //Set the layer of the bullet to this object's layer
-                    spawned.layer = this.gameObject.layer;
+                    this.photonView.RPC(nameof(PlayClip), RpcTarget.All, false);
                 }
             }
 
@@ -280,6 +289,52 @@ namespace COMP476A3
                 Vector2 trackTextureSpeed = Vector2.up * (currentSpeed * this.trackSpeed);
                 this.leftTrack.material.mainTextureOffset += trackTextureSpeed;
                 this.rightTrack.material.mainTextureOffset += trackTextureSpeed * rightTrackMod;
+            }
+        }
+
+        private void FixedUpdate()
+        {
+            //Do not move if game over
+            if (GameLogic.Instance.GameOver)
+            {
+                this.rigidbody.velocity = Vector3.zero;
+                this.rigidbody.angularVelocity = Vector3.zero;
+            }
+
+            //Only do physics work if on client machine
+            if (this.IsControllable() && this.rotateDir != Rotation.NONE)
+            {
+                //Rotation
+                float target = (float)this.targetDirection;
+                Quaternion rotation = this.rigidbody.rotation;
+                Vector3 euler = rotation.eulerAngles;
+
+                //Stop rotating when you reach the desired direction
+                if (Mathf.Abs(Mathf.DeltaAngle(euler.y, target)) < 0.001f)
+                {
+                    this.rotateDir = Rotation.NONE;
+                    this.rigidbody.angularVelocity = Vector3.zero;
+                    this.rigidbody.freezeRotation = true;
+                }
+                else
+                {
+                    //Else calculate necessary angular velocity
+                    float prevAngle = rotation.eulerAngles.y;
+                    float newAngle = Quaternion.RotateTowards(rotation, Quaternion.Euler(0f, target, 0f), this.rotateSpeed * Time.fixedDeltaTime).eulerAngles.y;
+                    this.rigidbody.angularVelocity = Vector3.up * ((Mathf.DeltaAngle(prevAngle, newAngle) * Mathf.Deg2Rad) / Time.fixedDeltaTime);
+                }
+            }
+        }
+
+        private void OnTriggerEnter(Collider other)
+        {
+            //Colliding with powerup
+            if (other.gameObject.CompareTag(POWERUP_TAG))
+            {
+                this.powerup = true;
+                this.photonView.RPC(nameof(PlayClip), RpcTarget.All, true);
+                other.GetComponent<Powerup>().Remove();
+                StartCoroutine(RemovePowerup());
             }
         }
         #endregion

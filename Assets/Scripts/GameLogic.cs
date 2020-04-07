@@ -73,6 +73,10 @@ namespace COMP476A3
         [SerializeField]
         private TankControl tankPrefab;
         [SerializeField]
+        private Vector3[] powerupLocations;
+        [SerializeField]
+        private GameObject powerupPrefab;
+        [SerializeField]
         private Color p1Color = Color.red, p2Color = Color.blue;
         private Text waitingText, resultText, scoreText;
         private PauseMenu pauseMenu;
@@ -207,6 +211,12 @@ namespace COMP476A3
                 //Spawn the tanks locally so that each client assumes ownership
                 SpawnTank(p1, true);
                 this.photonView.RPC(nameof(SpawnTank), RpcTarget.Others, p2, false);
+
+                //Instantiate powerups
+                foreach (Vector3 pos in this.powerupLocations)
+                {
+                    PhotonNetwork.Instantiate(this.powerupPrefab.name, pos, Quaternion.identity);
+                }
             }
         }
 
@@ -268,7 +278,6 @@ namespace COMP476A3
                 StartCoroutine(RestartGame());
             }
         }
-
 
         /// <summary>
         /// Restarts the scene after a delay
