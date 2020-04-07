@@ -37,6 +37,10 @@ MonoBehaviour:
   - DestroyThis
   - TakeDamage
   - TintBody
+  - Win
+  - SetupScore
+  - SetupOpponentName
+  - ReloadScene
   DisableAutoOpenWizard: 1
   ShowSettings: 0
   DevRegionSetOnce: 0

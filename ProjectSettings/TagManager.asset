@@ -8,6 +8,8 @@ TagManager:
   - Menu
   - Enemy
   - Label
+  - Result
+  - Score
   layers:
   - Default
   - TransparentFX

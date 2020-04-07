@@ -1,6 +1,7 @@
 ﻿using System;
 using Photon.Pun;
 using UnityEngine;
+using UnityEngine.UI;
 
 namespace COMP476A3
 {
@@ -57,14 +58,15 @@ namespace COMP476A3
         [SerializeField]
         private int maxHealth = 50;
         [SerializeField]
+        private Image healthBar;
+        [SerializeField]
         private GameObject explosion;
         [SerializeField]
         private Renderer body;
-        [SerializeField]
-        private Color p1Colour = Color.red, p2Colour = Color.blue;
         private Rotation rotateDir = Rotation.NONE;
         private Direction targetDirection;
         private new Rigidbody rigidbody;
+        private float smoothSpeed;
         #endregion
 
         #region Properties
@@ -72,6 +74,11 @@ namespace COMP476A3
         /// This tank's health
         /// </summary>
         public float Health { get; private set; }
+
+        /// <summary>
+        /// The health percentage of the tank
+        /// </summary>
+        private float HealthPercent => this.Health / this.maxHealth;
         #endregion
 
         #region Static methods
@@ -91,15 +98,19 @@ namespace COMP476A3
         [PunRPC]
         public void TakeDamage(int damage)
         {
+            if (GameLogic.Instance.GameOver) { return; }
             if (this.Health <= damage)
             {
-                this.Health = 0;
+                this.Health = 0f;
                 if (PhotonNetwork.IsConnected)
                 {
                     if (this.photonView.IsMine)
                     {
                         PhotonNetwork.Instantiate(this.explosion.name, this.transform.position, Quaternion.identity);
                         PhotonNetwork.Destroy(this.gameObject);
+
+                        //Lose the game
+                        GameLogic.Instance.Lose();
                     }
                 }
                 else
@@ -117,9 +128,8 @@ namespace COMP476A3
         /// <summary>
         /// Tints the body of this tank for the correct player
         /// </summary>
-        /// <param name="isP1">If this tank is Player 1</param>
         [PunRPC]
-        public void TintBody(bool isP1) => this.body.material.color = isP1 ? this.p1Colour : this.p2Colour;
+        public void TintBody() => this.body.material.color = this.photonView.IsMine ? GameLogic.Instance.PlayerColour : GameLogic.Instance.OpponentColour;
         #endregion
 
         #region Functions
@@ -128,6 +138,7 @@ namespace COMP476A3
             //Make sure the original direction is correctly set
             this.targetDirection = (Direction)ClampAngle((int)Math.Round(this.transform.rotation.eulerAngles.y));
             this.rigidbody = GetComponent<Rigidbody>();
+            this.rigidbody.freezeRotation = true;
             this.Health = this.maxHealth;
 
             if (!this.IsControllable())
@@ -141,6 +152,13 @@ namespace COMP476A3
 
         private void FixedUpdate()
         {
+            //Do not move if game over
+            if (GameLogic.Instance.GameOver)
+            {
+                this.rigidbody.velocity = Vector3.zero;
+                this.rigidbody.angularVelocity = Vector3.zero;
+            }
+
             //Only do physics work if on client machine
             if (this.IsControllable() && this.rotateDir != Rotation.NONE)
             {
@@ -154,6 +172,7 @@ namespace COMP476A3
                 {
                     this.rotateDir = Rotation.NONE;
                     this.rigidbody.angularVelocity = Vector3.zero;
+                    this.rigidbody.freezeRotation = true;
                 }
                 else
                 {
@@ -167,6 +186,8 @@ namespace COMP476A3
 
         private void Update()
         {
+            if (GameLogic.Instance.GameOver) { return; }
+
             //Only catch input for client tanks
             if (this.IsControllable())
             {
@@ -182,6 +203,7 @@ namespace COMP476A3
                         this.rotateDir = Rotation.LEFT;
                         this.targetDirection = (Direction)ClampAngle((int)this.targetDirection - 90);
                         this.rigidbody.velocity = Vector3.zero;
+                        this.rigidbody.freezeRotation = false;
                     }
                 }
                 else if (Input.GetButton("Right") && this.rotateDir != Rotation.RIGHT)
@@ -190,6 +212,7 @@ namespace COMP476A3
                     this.rotateDir = Rotation.RIGHT;
                     this.targetDirection = (Direction)ClampAngle((int)this.targetDirection + 90);
                     this.rigidbody.velocity = Vector3.zero;
+                    this.rigidbody.freezeRotation = false;
                 }
                 //Only move forwards or backwards if we are not turning
                 else if (this.rotateDir == Rotation.NONE)
@@ -201,20 +224,23 @@ namespace COMP476A3
                 if (Input.GetButtonDown("Fire"))
                 {
                     Vector3 spawnLocation = this.transform.position + this.transform.TransformVector(this.bulletSpawn);
-                    GameObject bullet;
+                    GameObject spawned;
                     if (PhotonNetwork.IsConnected)
                     {
-                        bullet = PhotonNetwork.Instantiate(this.bullet.name, spawnLocation, this.rigidbody.rotation);
+                        spawned = PhotonNetwork.Instantiate(this.bullet.name, spawnLocation, this.rigidbody.rotation);
                     }
                     else
                     {
-                        bullet = Instantiate(this.bullet, spawnLocation, this.rigidbody.rotation).gameObject;
+                        spawned = Instantiate(this.bullet, spawnLocation, this.rigidbody.rotation).gameObject;
                     }
 
                     //Set the layer of the bullet to this object's layer
-                    bullet.layer = this.gameObject.layer;
+                    spawned.layer = this.gameObject.layer;
                 }
             }
+
+            //Adjust health bar
+            this.healthBar.fillAmount = Mathf.SmoothDamp(this.healthBar.fillAmount, this.HealthPercent, ref this.smoothSpeed, 0.2f);
 
             //Get speed
             float currentSpeed;
